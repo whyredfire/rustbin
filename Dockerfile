@@ -1,21 +1,20 @@
 FROM rust:trixie AS builder
 
-RUN apt-get update && apt-get install -y golang build-essential git && rm -rf /var/lib/apt/lists/*
+COPY --from=golang:1.26-trixie /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:$PATH" \
+    GOTOOLCHAIN=local
 
 WORKDIR /src
+COPY . .
 
-RUN git clone --depth 1 https://github.com/PeroSar/rustbin.git .
+ENV RUSTFLAGS="-C target-feature=+crt-static"
+RUN cargo install --locked --path . --bin rustbin \
+    --target "$(uname -m)-unknown-linux-gnu" --root /out \
+    && mkdir /out/data
 
-RUN cargo build --release --locked
-
-FROM debian:trixie-slim
-WORKDIR /app
-
-RUN apt-get update \
-    && apt-get install -y ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /src/target/release/rustbin /usr/local/bin/rustbin
+FROM scratch
+COPY --from=builder /out/bin/rustbin /rustbin
+COPY --from=builder /out/data /data
 
 ENV HOST=0.0.0.0
 ENV PORT=3000
@@ -29,8 +28,7 @@ ENV DB_MIN_CONNECTIONS=1
 ENV DB_MAX_CONNECTIONS=5
 ENV RUST_LOG=rustbin=info,sqlx=warn
 
-RUN mkdir -p /data
 VOLUME ["/data"]
 EXPOSE 3000
 
-CMD ["rustbin"]
+ENTRYPOINT ["/rustbin"]
